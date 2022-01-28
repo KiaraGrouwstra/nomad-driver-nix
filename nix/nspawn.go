@@ -133,23 +133,24 @@ type MachineAddrs struct {
 }
 
 type MachineConfig struct {
-	Bind             hclutils.MapStrStr `codec:"bind"`
-	BindReadOnly     hclutils.MapStrStr `codec:"bind_read_only"`
-	Boot             bool               `codec:"boot"`
-	Capability       []string           `codec:"capability"`
-	Command          []string           `codec:"command"`
-	Console          string             `codec:"console"`
-	Environment      hclutils.MapStrStr `codec:"environment"`
-	Ephemeral        bool               `codec:"ephemeral"`
-	Image            string             `codec:"image"`
-	ImageDownload    *ImageDownloadOpts `codec:"image_download,omitempty"`
-	Machine          string             `codec:"machine"`
-	NetworkNamespace string             `codec:"network_namespace"`
-	NetworkVeth      bool               `codec:"network_veth"`
-	NetworkZone      string             `codec:"network_zone"`
-	PivotRoot        string             `codec:"pivot_root"`
-	Port             hclutils.MapStrStr `codec:"port"`
-	Ports            []string           `codec:"ports"` // :-(
+	Bind             hclutils.MapStrStr  `codec:"bind"`
+	BindReadOnly     hclutils.MapStrStr  `codec:"bind_read_only"`
+	Overlay          map[string][]string `codec:"overlay"`
+	Boot             bool                `codec:"boot"`
+	Capability       []string            `codec:"capability"`
+	Command          []string            `codec:"command"`
+	Console          string              `codec:"console"`
+	Environment      hclutils.MapStrStr  `codec:"environment"`
+	Ephemeral        bool                `codec:"ephemeral"`
+	Image            string              `codec:"image"`
+	ImageDownload    *ImageDownloadOpts  `codec:"image_download,omitempty"`
+	Machine          string              `codec:"machine"`
+	NetworkNamespace string              `codec:"network_namespace"`
+	NetworkVeth      bool                `codec:"network_veth"`
+	NetworkZone      string              `codec:"network_zone"`
+	PivotRoot        string              `codec:"pivot_root"`
+	Port             hclutils.MapStrStr  `codec:"port"`
+	Ports            []string            `codec:"ports"` // :-(
 	// Deprecated: Nomad dropped support for task network resources in 0.12
 	PortMap          hclutils.MapStrInt `codec:"port_map"`
 	ProcessTwo       bool               `codec:"process_two"`
@@ -262,6 +263,9 @@ func (c *MachineConfig) ConfigArray() ([]string, error) {
 	}
 	for k, v := range c.BindReadOnly {
 		args = append(args, "--bind-ro", k+":"+v)
+	}
+	for k, v := range c.Overlay {
+		args = append(args, "--overlay", strings.Join(v, ":")+":"+k)
 	}
 	for k, v := range c.Environment {
 		args = append(args, "-E", k+"="+v)
@@ -412,17 +416,30 @@ func (c *MachineConfig) prepareNixPackages(dir string) error {
 	}
 
 	c.BindReadOnly[profile] = profile
+	c.BindReadOnly[filepath.Join(closure, "registration")] = "/registration"
+
+	if c.Overlay == nil {
+		c.Overlay = map[string][]string{}
+	}
 
 	if entries, err := os.ReadDir(profile); err != nil {
 		return fmt.Errorf("Couldn't read profile directory: %w", err)
 	} else {
 		for _, entry := range entries {
 			name := entry.Name()
-			c.BindReadOnly[filepath.Join(profile, name)] = "/" + name
+			target := "/" + name
+			if c.Overlay[target] == nil {
+				c.Overlay[target] = []string{}
+			}
+			c.Overlay[target] = append(c.Overlay[target], filepath.Join(profile, name))
 		}
 	}
 
-	c.BindReadOnly[filepath.Join(closure, "registration")] = "/registration"
+	// An empty last component redirects writes to
+	// a temporary directory under /var/tmp/ on the host.
+	for target := range c.Overlay {
+		c.Overlay[target] = append(c.Overlay[target], "")
+	}
 
 	requisites, err := nixRequisites(closure)
 	if err != nil {
