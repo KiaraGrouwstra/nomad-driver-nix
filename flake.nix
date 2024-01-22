@@ -15,8 +15,8 @@
       inherit nixpkgs;
 
       preOverlays = [
-        devshell.overlay
-        nix.overlay
+        devshell.overlays.default
+        nix.overlays.default
       ];
 
       overlay = final: prev: {
